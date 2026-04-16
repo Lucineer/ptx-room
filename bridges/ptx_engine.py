@@ -220,7 +220,7 @@ def compile_ptx(ptx_code: str, timeout: int = NVCC_TIMEOUT) -> dict:
         os.close(fd)
         
         result = subprocess.run(
-            ["ptxas", "--gpu-name=sm_87", "--output-file=/dev/null", ptx_file],
+            ["ptxas", "--gpu-name=sm_87", "--output-file=/dev/null", "--verbose", ptx_file],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -257,7 +257,7 @@ def compile_ptxas(ptx_code: str, gpu_arch: str = "sm_87", timeout: int = NVCC_TI
         os.close(fd)
         
         result = subprocess.run(
-            ["ptxas", "--output-file", "/dev/null", f"--gpu-name={gpu_arch}", ptx_file],
+            ["ptxas", "--output-file", "/dev/null", f"--gpu-name={gpu_arch}", "--verbose", ptx_file],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -272,9 +272,25 @@ def compile_ptxas(ptx_code: str, gpu_arch: str = "sm_87", timeout: int = NVCC_TI
             m = re.search(r'(\d+)\s+register', line)
             if m:
                 registers = int(m.group(1))
-            m = re.search(r'occupancy.*?(\d+(?:\.\d+)?)', line, re.IGNORECASE)
-            if m:
-                occupancy = float(m.group(1))
+        
+        # Calculate occupancy for sm_87 (Orin):
+        # Max 2048 threads/SM, max 32 blocks/SM, 64 warps/SM, 65536 regs/SM
+        if registers > 0:
+            regs_per_sm = 65536
+            # Parse .maxntid from PTX to get threads_per_block
+            threads_per_block = 1
+            for line in ptx_code.split("\n"):
+                m = re.match(r'\.maxntid\s+(\d+)', line)
+                if m:
+                    threads_per_block = int(m.group(1))
+                    break
+            # Max blocks limited by registers: regs_per_sm / (regs * threads_per_block)
+            blocks_by_regs = regs_per_sm // (registers * threads_per_block)
+            # Max blocks limited by threads: 2048 / threads_per_block
+            blocks_by_threads = 2048 // threads_per_block
+            # Hard cap: 32 blocks/SM on sm_87
+            max_blocks = min(blocks_by_regs, blocks_by_threads, 32)
+            occupancy = min(1.0, (max_blocks * threads_per_block) / 2048.0)
         
         return {
             "success": result.returncode == 0,
@@ -346,7 +362,7 @@ def evaluate_constraint(constraint_id: str, ptx_code: str) -> dict:
             }
     
     if constraint_id == "occupancy" and result.get("success"):
-        occ = result.get("occupancy", 0.0)
+        occ = result.get("occupancy", 0.0) * 100.0  # convert fraction to percentage
         if occ < 25.0:
             return {
                 "passes": False,
