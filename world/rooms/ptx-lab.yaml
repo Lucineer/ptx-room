@@ -1,0 +1,23 @@
+name: PTX Lab
+description: CUDA PTX assembly room. Compiles PTX, evaluates constraints, tracks agent mastery.
+state:
+  active_agents: []
+  total_compilations: 0
+  hardware_target: "Jetson Orin Nano (sm_87)"
+constraints:
+  - id: syntax
+    description: "PTX must compile with nvcc -ptx"
+    tolerance: 0.0
+    command: "nvcc -ptx -o /dev/null -"
+  - id: register_pressure
+    description: "Register count ≤ 255"
+    tolerance: 0.1
+    command: "ptxas --output-file /dev/null --gpu-name sm_87 -"
+  - id: occupancy
+    description: "Occupancy ≥ 25%"
+    tolerance: 0.2
+    command: "ptxas --output-file /dev/null --gpu-name sm_87 --opt-level 3 -"
+  - id: performance
+    description: "Performance ≥ baseline (nsight compute)"
+    tolerance: 0.3
+    command: "ncu --metrics sm__throughput.avg.pct_of_peak_sustained_elapsed --target-processes application -"

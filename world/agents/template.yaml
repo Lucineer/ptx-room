@@ -1,0 +1,13 @@
+name: AGENT_NAME
+room: ptx-lab
+stats:
+  turns_completed: 0
+  snap_accuracy: 0.0
+  avg_tightening_rounds: 0.0
+  mastery_level: 0
+learned_patterns: []
+ptx_instincts:
+  - pattern: "mov.u32 %r0, 0;"
+    success_rate: 0.0
+    register_count: 1
+    occupancy_impact: 0.01

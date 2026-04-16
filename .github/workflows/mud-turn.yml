@@ -1,0 +1,22 @@
+name: PTX Room Turn
+on:
+  push:
+    paths: ['world/commands/**']
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.6.0-devel-ubuntu22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Process PTX turns
+        run: |
+          cd bridges
+          python3 ptx_engine.py
+      - name: Commit results
+        run: |
+          git config user.name "ptx-room-ci"
+          git config user.email "ci@ptx.local"
+          git add world/
+          git commit -m "turn $(date +%s)" || echo "No changes to commit"
+          git push
