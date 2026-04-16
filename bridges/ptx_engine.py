@@ -202,14 +202,17 @@ class FileLock:
 
 def compile_ptx(ptx_code: str, timeout: int = NVCC_TIMEOUT) -> dict:
     """
-    Compile PTX in a sandboxed subprocess.
+    Validate PTX via ptxas assembly (the real syntax gate).
     
     Security:
     - No shell=True (no shell injection)
     - No output files written to disk
     - Timeout enforced
-    - Only nvcc binary called
+    - Only ptxas binary called (whitelisted)
     - PTX written to temp file in /tmp, deleted after
+    
+    Note: nvcc -ptx expects .cu input, not .ptx input.
+    For PTX-as-input, we use ptxas which is the actual assembler.
     """
     fd, ptx_file = tempfile.mkstemp(suffix=".ptx")
     try:
@@ -217,11 +220,10 @@ def compile_ptx(ptx_code: str, timeout: int = NVCC_TIMEOUT) -> dict:
         os.close(fd)
         
         result = subprocess.run(
-            ["nvcc", "-ptx", "-o", "/dev/null", ptx_file],
+            ["ptxas", "--gpu-name=sm_87", "--output-file=/dev/null", ptx_file],
             capture_output=True,
             text=True,
             timeout=timeout,
-            # Security: no shell, no env leak, no cwd manipulation
             shell=False,
             env={"PATH": "/usr/local/cuda/bin:/usr/bin:/bin", "HOME": "/tmp"}
         )
@@ -229,7 +231,7 @@ def compile_ptx(ptx_code: str, timeout: int = NVCC_TIMEOUT) -> dict:
         return {
             "success": result.returncode == 0,
             "returncode": result.returncode,
-            "stdout": result.stdout[:4096],  # Truncate output
+            "stdout": result.stdout[:4096],
             "stderr": result.stderr[:4096],
             "timed_out": False
         }
@@ -238,7 +240,7 @@ def compile_ptx(ptx_code: str, timeout: int = NVCC_TIMEOUT) -> dict:
             "success": False,
             "returncode": -1,
             "stdout": "",
-            "stderr": f"Compilation timed out after {timeout}s",
+            "stderr": f"ptxas timed out after {timeout}s",
             "timed_out": True
         }
     finally:
