@@ -1,23 +1,58 @@
+# PTX Lab Room State v0.2
+# Schema-validated, version-controlled, bulletproof
+
 name: PTX Lab
-description: CUDA PTX assembly room. Compiles PTX, evaluates constraints, tracks agent mastery.
+version: "0.2"
+description: CUDA PTX assembly room. Agents submit PTX, CI compiles, constraints gate, profiles learn.
+
 state:
-  active_agents: []
   total_compilations: 0
-  hardware_target: "Jetson Orin Nano (sm_87)"
+  total_agents: 0
+  active_agents: []
+  hardware_target: "sm_87"  # Jetson Orin Nano
+  max_ptx_size: 65536       # 64KB
+  max_turns_per_run: 50     # CI abuse prevention
+  created: "2026-04-15T20:35:00Z"
+  last_turn: null
+
+# Constraint gates — evaluated in order, stop on first failure
+# Each gate: snap (pass/fail), then tighten if failed
 constraints:
   - id: syntax
     description: "PTX must compile with nvcc -ptx"
-    tolerance: 0.0
-    command: "nvcc -ptx -o /dev/null -"
+    tolerance: 0.0          # Zero tolerance — must compile
+    timeout_seconds: 30
+
   - id: register_pressure
-    description: "Register count ≤ 255"
-    tolerance: 0.1
-    command: "ptxas --output-file /dev/null --gpu-name sm_87 -"
+    description: "Register count ≤ 255 per thread"
+    tolerance: 0.1          # Small tolerance — register pressure near limit OK
+    timeout_seconds: 30
+    params:
+      max_registers: 255
+      gpu_arch: "sm_87"
+
   - id: occupancy
-    description: "Occupancy ≥ 25%"
-    tolerance: 0.2
-    command: "ptxas --output-file /dev/null --gpu-name sm_87 --opt-level 3 -"
+    description: "Occupancy ≥ 25% for target GPU"
+    tolerance: 0.2          # Medium tolerance — occupancy varies
+    timeout_seconds: 30
+    params:
+      min_occupancy: 25.0
+      gpu_arch: "sm_87"
+
   - id: performance
-    description: "Performance ≥ baseline (nsight compute)"
-    tolerance: 0.3
-    command: "ncu --metrics sm__throughput.avg.pct_of_peak_sustained_elapsed --target-processes application -"
+    description: "Performance ≥ baseline (requires benchmark harness)"
+    tolerance: 0.3          # Loose tolerance — performance varies by workload
+    timeout_seconds: 60
+    params:
+      baseline_ns: null     # Set by benchmark runs
+
+# Security policy
+security:
+  allowed_commands:
+    - nvcc
+    - ptxas
+  blocked_directives:
+    - ".file"     # No external file references
+    - ".section"  # No raw section manipulation
+  max_agent_name_length: 32
+  max_turns_per_agent_per_day: 100  # Rate limiting

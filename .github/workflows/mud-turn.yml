@@ -1,22 +1,109 @@
-name: PTX Room Turn
+name: PTX Room — Turn Processor
+run-name: "PTX Turn ${{ github.run_number }}"
+
 on:
   push:
     paths: ['world/commands/**']
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action'
+        required: false
+        default: 'process'
+        type: choice
+        options: [process, validate, standings, dry-run]
+
+permissions:
+  contents: write
+
+# Prevent concurrent turns — serialize processing
+concurrency:
+  group: ptx-room-turn
+  cancel-in-progress: false
+
 jobs:
-  process:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Validate commands
+        run: python bridges/ptx_engine.py --validate-only
+
+  process_turn:
+    needs: validate
     runs-on: ubuntu-latest
     container:
       image: nvidia/cuda:12.6.0-devel-ubuntu22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Process PTX turns
+        with:
+          fetch-depth: 0  # Need full history for conflict detection
+
+      - name: Install Python deps
+        run: pip install pyyaml
+
+      - name: Check for merge conflicts
         run: |
-          cd bridges
-          python3 ptx_engine.py
-      - name: Commit results
+          # Detect if CI push would conflict with new commits
+          git fetch origin
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git rev-parse origin/${{ github.ref_name }})
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "::warning::Local and remote diverged, attempting rebase"
+            git rebase origin/${{ github.ref_name }} || {
+              echo "::error::Rebase failed — concurrent turn conflict"
+              exit 1
+            }
+          fi
+
+      - name: Process agent commands
+        run: |
+          cd $GITHUB_WORKSPACE
+          python bridges/ptx_engine.py --world-dir world 2>&1 | tee ptx-turn.log
+          echo "EXIT_CODE=$?" >> $GITHUB_ENV
+
+      - name: Commit world state
+        if: env.EXIT_CODE == '0'
         run: |
           git config user.name "ptx-room-ci"
-          git config user.email "ci@ptx.local"
+          git config user.email "ci@ptx-room.dev"
           git add world/
-          git commit -m "turn $(date +%s)" || echo "No changes to commit"
-          git push
+          # Only commit if there are actual changes
+          if git diff --cached --quiet; then
+            echo "No state changes to commit"
+          else
+            git commit -m "Turn ${{ github.run_number }} processed"
+            # Retry push up to 3 times (handle concurrent pushes)
+            for i in 1 2 3; do
+              if git push; then
+                echo "Push succeeded"
+                break
+              fi
+              echo "Push failed (attempt $i), pulling and retrying..."
+              git pull --rebase || true
+              sleep 5
+            fi
+          fi
+
+      - name: Archive turn logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turn-${{ github.run_number }}
+          path: |
+            world/logs/
+            ptx-turn.log
+          retention-days: 30
+
+      - name: Print standings
+        if: always()
+        run: python bridges/ptx_engine.py --standings --world-dir world

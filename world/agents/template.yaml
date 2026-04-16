@@ -1,13 +1,23 @@
-name: AGENT_NAME
+# Agent Profile Template v0.2
+# Copy this to world/agents/your-name.yaml and fill in
+
+name: ""  # REQUIRED: alphanumeric + dash/underscore, max 32 chars
 room: ptx-lab
+created: null  # Auto-populated on first turn
+
 stats:
   turns_completed: 0
-  snap_accuracy: 0.0
-  avg_tightening_rounds: 0.0
-  mastery_level: 0
+  snap_accuracy: 0.0          # EMA (alpha=0.1) of all-constraint-pass rate
+  avg_tightening_rounds: 0.0  # Average constraints evaluated before stop
+  mastery_level: 0            # 0=none, 1=novice, 2=apprentice, 3=journeyman, 4=master
+  last_turn: null
+  streak_pass: 0              # Consecutive all-pass turns
+  streak_fail: 0              # Consecutive failure turns
+
+# Learned patterns — populated automatically
+# Each pattern: {trigger, approach, success_rate, sample_count}
 learned_patterns: []
-ptx_instincts:
-  - pattern: "mov.u32 %r0, 0;"
-    success_rate: 0.0
-    register_count: 1
-    occupancy_impact: 0.01
+
+# Constraints history — last 100 turns
+# Each entry: {turn, timestamp, all_passed, rounds}
+constraints_history: []
